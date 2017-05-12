@@ -79,6 +79,7 @@ static int spi_protocol_generic_probe(struct spi_device *spi) {
     }
 
     printk("transfer ok\n");
+    return 0;
 }
 
 static int spi_protocol_generic_remove(struct spi_device *spi)
@@ -89,8 +90,8 @@ static int spi_protocol_generic_remove(struct spi_device *spi)
 
 static struct spi_driver spi_protocol_generic = {
     .driver = {
-        .owner      =  THIS_MODULE,
-        .name       = "spi-protocol-generic",
+        .owner          = THIS_MODULE,
+        .name           = "spi-protocol-generic",
         .of_match_table = of_match_ptr(spi_protocol_generic_of_match),
     },
     .probe  = spi_protocol_generic_probe,
