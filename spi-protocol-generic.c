@@ -30,8 +30,8 @@ MODULE_DEVICE_TABLE(of, spi_protocol_generic_of_match);
 static int spi_protocol_generic_probe(struct spi_device *spi) {
     int err;
     const struct of_device_id *match;
-    unsigned char ch16[] = {0x5A, 0x5A};    
-    unsigned char rx16[] = {0x00, 0x00};
+    unsigned char ch16[] = {0xDE, 0xAD};    
+    unsigned char *rx16 = kzalloc(2, GFP_KERNEL);
     int devData = 0;
     printk("mySPI_slave::my_device_probe called.\n");
 
@@ -51,7 +51,7 @@ static int spi_protocol_generic_probe(struct spi_device *spi) {
     
     err = spi_setup(spi);
     if (err < 0) {
-            printk("mySPI_slave::my_device_probe spi_setup failed!\n");
+        printk("mySPI_slave::my_device_probe spi_setup failed!\n");
         return err;
     }
 
@@ -61,15 +61,12 @@ static int spi_protocol_generic_probe(struct spi_device *spi) {
     struct spi_transfer spi_element[] = {
         {
             .len = 2,
-            .cs_change = 0,
+            .cs_change = 1,
         }, 
-        {
-            .len = 2,
-        },
     };
 
     spi_element[0].tx_buf = ch16;
-    spi_element[1].rx_buf = rx16;
+    spi_element[0].rx_buf = rx16;
 
     err = spi_sync_transfer(spi, spi_element, ARRAY_SIZE(spi_element));
     printk("data size: %d\n", sizeof(rx16));
@@ -79,6 +76,9 @@ static int spi_protocol_generic_probe(struct spi_device *spi) {
     }
 
     printk("transfer ok\n");
+    printk("%X\n", rx16[0]);
+    print_hex_dump_bytes("", DUMP_PREFIX_NONE, rx16, ARRAY_SIZE(rx16));
+
     return 0;
 }
 
@@ -98,7 +98,23 @@ static struct spi_driver spi_protocol_generic = {
     .remove = spi_protocol_generic_remove,  
 };
 
-module_spi_driver(spi_protocol_generic);
+
+static int __init spi_protocol_generic_init(void) {
+    int status;
+    status = spi_register_driver(&spi_protocol_generic);
+    return status;
+}
+
+static void __exit spi_protocol_generic_exit(void) {
+    spi_unregister_driver(&spi_protocol_generic);
+
+}
+
+module_init(spi_protocol_generic_init);
+module_exit(spi_protocol_generic_exit);
+
+// module_spi_driver(spi_protocol_generic);
 MODULE_DESCRIPTION("Generic SPI driver for echo device");
 MODULE_AUTHOR("Georgiy Odisharia");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS("spi-protocol-generic");
