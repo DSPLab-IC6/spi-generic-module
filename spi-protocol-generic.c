@@ -33,58 +33,61 @@ static int spi_protocol_generic_probe(struct spi_device *spi) {
     unsigned char ch16[] = {0xDE, 0xAD};    
     unsigned char *rx16 = kzalloc(2, GFP_KERNEL);
     int devData = 0;
-    printk("mySPI_slave::my_device_probe called.\n");
+    printk("spi-protocol-generic: probe called.\n");
 
     // check and read data from of_device_id...
     match = of_match_device(spi_protocol_generic_of_match, &spi->dev);
     if(!match) {
-        printk("mySPI_slave::my_device_probe drvice not found in device tree...\n");
+        printk("spi-protocol-generic: device not found in device tree...\n");
     } 
     else {
         devData = match->data;
-        printk("mySPI_slave::my_device_probe data is: %d\n", devData);
+        printk("spi-protocol-generic: probe data is: %d\n", devData);
     }
-
 
     spi->bits_per_word = 8;
     spi->mode = (0);
     
     err = spi_setup(spi);
     if (err < 0) {
-        printk("mySPI_slave::my_device_probe spi_setup failed!\n");
+        printk("spi-protocol-generic: spi_setup failed!\n");
         return err;
     }
 
-    printk("spi_setup ok, cs: %d\n", spi->chip_select);
-    printk("start data transfer...\n");
+    printk("spi-protocol-generic: spi_setup ok, cs: %d\n", spi->chip_select);
+    printk("spi-protocol-generic: start data transfer...\n");
 
     struct spi_transfer spi_element[] = {
         {
             .len = 2,
-            .cs_change = 1,
+        },
+        {
+            .len = 2,
         }, 
     };
 
     spi_element[0].tx_buf = ch16;
-    spi_element[0].rx_buf = rx16;
+    spi_element[0].speed_hz = 20000;
+    spi_element[1].rx_buf = rx16;
+    spi_element[1].speed_hz = 20000;
 
     err = spi_sync_transfer(spi, spi_element, ARRAY_SIZE(spi_element));
-    printk("data size: %d\n", sizeof(rx16));
+    printk("data size: %d\n", 2);
     if (err < 0) {
-        printk("mySPI_slave::my_device_probe spi_sync_transfer failed!\n");
+        printk("spi-protocol-generic: spi_sync_transfer failed!\n");
         return err;
     }
 
-    printk("transfer ok\n");
-    printk("%X\n", rx16[0]);
-    print_hex_dump_bytes("", DUMP_PREFIX_NONE, rx16, ARRAY_SIZE(rx16));
+    printk("spi-protocol-generic: transfer ok\n");
+    printk("%X %X\n", rx16[0], rx16[1]);
+    print_hex_dump_bytes("", DUMP_PREFIX_NONE, rx16, 2);
 
     return 0;
 }
 
 static int spi_protocol_generic_remove(struct spi_device *spi)
 {
-    printk("my_device_remove() called.\n");
+    printk("spi-protocol-generic: remove().\n");
     return 0;
 }
 
@@ -117,4 +120,3 @@ module_exit(spi_protocol_generic_exit);
 MODULE_DESCRIPTION("Generic SPI driver for echo device");
 MODULE_AUTHOR("Georgiy Odisharia");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("spi-protocol-generic");
