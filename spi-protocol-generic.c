@@ -25,7 +25,42 @@ static const struct of_device_id spi_protocol_generic_of_match[] = {
     { },
 };
 MODULE_DEVICE_TABLE(of, spi_protocol_generic_of_match);
+
+
+// (2) finding a match from stripped device-tree (no vendor part)
+static const struct spi_device_id spi_protocol_generic_device_id[] = {
+    { "pro-mini-spi-generic", 0 },
+    { },
+};
+MODULE_DEVICE_TABLE(spi, spi_protocol_generic_device_id);
 #endif // CONFIG_OF
+
+// Char subsystem functions;
+static int spi_protocol_generic_open(struct inode *inode, struct file *file_p) 
+{
+}
+
+static int spi_protocol_generic_release(struct inode *inode, struct file *file_p)
+{
+}
+
+static ssize_t 
+spi_protocol_generic_read(struct file *file_p, char __user *buf, size_t lbuf, loff_t *ppos)
+{
+}
+
+static ssize_t
+spi_protocol_generic_write(struct file *file_p, const char __user *buf, size_t lbuf, loff_t *ppos)
+
+
+
+static const struct file_operations spi_protocol_generic_fops = {
+    .owner      = THIS_MODULE,
+    .write      = spi_protocol_generic_write,
+    .read       = spi_protocol_generic_read,
+    .open       = spi_protocol_generic_open,
+    .release    = spi_protocol_generic_release,
+};
 
 static int spi_protocol_generic_probe(struct spi_device *spi) {
     int err;
@@ -72,7 +107,7 @@ static int spi_protocol_generic_probe(struct spi_device *spi) {
     spi_element[1].speed_hz = 20000;
 
     err = spi_sync_transfer(spi, spi_element, ARRAY_SIZE(spi_element));
-    printk("data size: %d\n", 2);
+    printk("spi-protocol-generic: data size is %d\n", 2);
     if (err < 0) {
         printk("spi-protocol-generic: spi_sync_transfer failed!\n");
         return err;
