@@ -23,8 +23,8 @@
 #include <linux/cdev.h>
 
 
-#define SPI_CLASS_NAME 					"spi_protocol_generic"
-#define SPI_PROTOCOL_GENERIC_DEVICE_0 	"pro_mini_spi_generic"
+#define SPI_CLASS_NAME          "spi_protocol_generic"
+#define SPI_PROTOCOL_GENERIC_DEVICE_0  "pro_mini_spi_generic"
 
 static dev_t spi_protocol_generic_dev_t;
 static struct device        *spi_protocol_generic_dev;
@@ -68,7 +68,7 @@ static int spi_protocol_generic_release(struct inode *inode, struct file *file_p
 
 static ssize_t
 spi_protocol_generic_read(struct file *file_p, char __user *buf, size_t lbuf,
-			  loff_t *ppos)
+        loff_t *ppos)
 {
     int err;
     u8 *read_buffer;
@@ -92,7 +92,7 @@ spi_protocol_generic_read(struct file *file_p, char __user *buf, size_t lbuf,
 
 static ssize_t
 spi_protocol_generic_write(struct file *file_p, const char __user *buf,
-			   size_t lbuf, loff_t *ppos)
+         size_t lbuf, loff_t *ppos)
 {
 
     int err;
@@ -109,6 +109,8 @@ spi_protocol_generic_write(struct file *file_p, const char __user *buf,
 
     if (err != 0)
         return -EFAULT;
+
+    printk(KERN_WARNING "spi-protocol-generic: copy from us to ks ok\n");
 
     write_arduino[0].tx_buf = write_buffer;
     write_arduino[0].rx_buf = NULL;
@@ -133,14 +135,14 @@ static int spi_protocol_generic_probe(struct spi_device *spi)
     int err;
 
     const struct of_device_id *match;
-	int devData = 0;
+  int devData = 0;
 
     int max_speed_arduino = 20000;
 
     unsigned char ch16[] = {0xDE, 0xAD};
     unsigned char *rx16 = kzalloc(2, GFP_KERNEL);
 
-	printk(KERN_DEBUG "spi-protocol-generic: probe called.\n");
+  printk(KERN_DEBUG "spi-protocol-generic: probe called.\n");
 
     __spi_device_internal = spi;
     default_values.speed_hz         = spi->max_speed_hz;
@@ -170,29 +172,24 @@ static int spi_protocol_generic_probe(struct spi_device *spi)
         return err;
     } else {
         printk(KERN_DEBUG "spi-protocol-generic: now speed is %d Hz\n",
-	       spi->max_speed_hz);
+         spi->max_speed_hz);
     }
 
     printk(KERN_DEBUG "spi-protocol-generic: spi_setup ok, cs: %d\n",
-	   spi->chip_select);
+     spi->chip_select);
     printk(KERN_DEBUG "spi-protocol-generic: start data transfer...\n");
 
-    struct spi_transfer spi_element[] = {
-        {
-            .len = 2,
-        },
-        {
-            .len = 2,
-        },
-    };
+    struct spi_transfer spi_element[2]; 
 
     spi_element[0].tx_buf = ch16;
-    spi_element[0].speed_hz = 20000;
     spi_element[1].rx_buf = rx16;
-    spi_element[1].speed_hz = 20000;
+
+    for (u8 i = 0; i < 2; i++) {
+	spi_element[i].len = 0;
+    }
 
     err = spi_sync_transfer(__spi_device_internal, spi_element,
-			    ARRAY_SIZE(spi_element));
+          ARRAY_SIZE(spi_element));
     printk(KERN_DEBUG "spi-protocol-generic: data size is %d\n", 2);
     if (err < 0) {
         printk(KERN_DEBUG "spi-protocol-generic: spi_sync_transfer failed!\n");
@@ -213,7 +210,7 @@ static int spi_protocol_generic_probe(struct spi_device *spi)
     // create char device entry in sysfs...
     if (devData == 0) {
         err = alloc_chrdev_region(&spi_protocol_generic_dev_t, 0, 1,
-				  SPI_PROTOCOL_GENERIC_DEVICE_0);
+          SPI_PROTOCOL_GENERIC_DEVICE_0);
     }
     if (err < 0) {
         printk(KERN_DEBUG "spi_protocol_generic: alloc_chrdev_region failed!\n");
@@ -242,11 +239,11 @@ static int spi_protocol_generic_probe(struct spi_device *spi)
 
     if (devData == 0) {
         spi_protocol_generic_dev = device_create(spi_protocol_generic_class,
-						 NULL,
-						 spi_protocol_generic_dev_t,
-						 NULL,
-						 "%s",
-						 SPI_PROTOCOL_GENERIC_DEVICE_0);
+             NULL,
+             spi_protocol_generic_dev_t,
+             NULL,
+             "%s",
+             SPI_PROTOCOL_GENERIC_DEVICE_0);
     }
 
     return 0;
