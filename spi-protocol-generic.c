@@ -32,7 +32,6 @@ static dev_t spi_protocol_generic_dev_t;
 static struct device            *spi_protocol_generic_dev;
 static struct cdev              *spi_protocol_generic_cdev;
 static struct class             *spi_protocol_generic_class;
-static struct spi_device        *spi_protocol_generic_spi;
 
 struct spi_device_default_values {
         u32 speed_hz;
@@ -80,12 +79,12 @@ static struct spi_transfer *
 __make_reg_transfers(struct register_info *reg_info)
 {
 	struct spi_transfer *xfer, *head;
-	u8 *tx_buf, *rx_buf;
+	u8 *tx_buf;
 	unsigned n;
 
-	// Copy to global TX buffer addresses of reg_info fields
-	*tx_buffer_reg = &reg_info->reg_addr;
-	*(tx_buffer_reg + 1) = &reg_info->value;
+	// Copy to global TX buffer values of reg_info fields
+	*tx_buffer_reg = reg_info->reg_addr;
+	*(tx_buffer_reg + 1) = reg_info->value;
 
 	tx_buf = tx_buffer_reg;
 
@@ -110,8 +109,6 @@ static struct spi_transfer *
 __make_get_reg_transfers(struct register_info *reg_info)
 {
 	struct spi_transfer *xfer, *head;
-	u8 *tx_buf, *rx_buf;
-	unsigned n;
 
 	xfer = kcalloc(2, sizeof(struct spi_transfer), GFP_KERNEL);
 	if (xfer == NULL)
@@ -134,11 +131,15 @@ __make_get_reg_transfers(struct register_info *reg_info)
 // Char subsystem functions;
 static int spi_protocol_generic_open(struct inode *inode, struct file *file_p)
 {
+	int retval;
+	retval = nonseekable_open(inode, file_p);
+	return retval;
 }
 
 static int spi_protocol_generic_release(struct inode *inode,
                                         struct file *file_p)
 {
+	return 0;
 }
 
 static ssize_t
@@ -207,14 +208,13 @@ spi_protocol_generic_ioctl(struct file *file_p, unsigned int cmd,
 {
 	int retval = 0;
 	int status = 0;
-	u8  reg;
 	struct register_info tmp;
 	struct spi_transfer *spi_xfers;
 	struct spi_message *spi_msg;
 
 	switch (cmd) {
 	case SPI_GENERIC_SET_STATUS:
-		retval == copy_from_user(&tmp,
+		retval = copy_from_user(&tmp,
 					 (struct register_info __user *)arg,
 					 sizeof(struct register_info));
 		if (retval == 0) {
@@ -241,7 +241,7 @@ spi_protocol_generic_ioctl(struct file *file_p, unsigned int cmd,
 		}
 		break;
 	case SPI_GENERIC_GET_STATUS:
-		retval == copy_from_user(&tmp,
+		retval = copy_from_user(&tmp,
 					 (struct register_info __user *)arg,
 					 sizeof(struct register_info));
 
@@ -263,7 +263,7 @@ spi_protocol_generic_ioctl(struct file *file_p, unsigned int cmd,
 			kfree(spi_xfers);
 
 			if (status == 0) {
-				retval == copy_to_user(
+				retval = copy_to_user(
 					(struct register_info __user *)arg,
 					&tmp,
 					sizeof(struct register_info));
@@ -285,6 +285,7 @@ static const struct file_operations spi_protocol_generic_fops = {
 	.unlocked_ioctl = spi_protocol_generic_ioctl,
         .open           = spi_protocol_generic_open,
         .release        = spi_protocol_generic_release,
+	.llseek		= no_llseek,
 };
 
 static int spi_protocol_generic_probe(struct spi_device *spi)
