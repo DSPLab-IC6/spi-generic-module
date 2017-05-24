@@ -1,29 +1,27 @@
-# Makefile – makefile of our first driver
-
-TARGET = spi-generic-module
-
 .PHONY: all clean install uninstall
 
-BUILD_DIR ?= $(PWD)/build
-KDIR := ${HOME}/sysroots/staging/beaglebone-black/lib/modules/4.4.23/build
+SYSROOT := $(HOME)/sysroots/staging/beaglebone-black/
+KDIR ?= ${HOME}/sysroots/staging/beaglebone-black/lib/modules/4.4.23/build
 PWD := $(shell pwd)
+BUILD_DIR := $(PWD)/build
 export ARCH := arm
 export CROSS_COMPILE := armv7-bbb-linux-gnueabihf-
 
-all: $(TARGET)
-
-$(TARGET): $(BUILD_DIR)
-	$(MAKE) -C $(KDIR) SUBDIRS=$(BUILD_DIR) src=$(PWD) modules
+default: $(BUILD_DIR)
+	touch $(BUILD_DIR)/Makefile
+	$(MAKE) -C $(KDIR) M=$(BUILD_DIR) src=$(PWD) modules
 
 $(BUILD_DIR):
 	mkdir -p "$@"
 
 clean:
-	${MAKE} -C ${KDIR} SUBDIRS=${BUILD_DIR} src=$(PWD) clean
+	${MAKE} -C ${KDIR} M=$(BUILD_DIR) src=$(PWD) clean
 
 install:
-	install ${TARGET}.ko ${SYSROOT}/${PREFIX_KERNEL_MODULE}
+	$(MAKE) -C $(KDIR) SUBDIRS=$(BUILD_DIR) INSTALL_MOD_PATH=${SYSROOT} \
+		modules_install
 	install ${TARGET}.h  ${SYSROOT}/${PREFIX_HEADER}
+#	install ${TARGET}.ko ${SYSROOT}/${PREFIX_KERNEL_MODULE}
 
 uninstall:
 	rm -f ${SYSROOT}/${PREFIX_KERNEL_MODULE}/${TARGET}.ko
@@ -31,4 +29,3 @@ uninstall:
 
 deploy:
 	./deploy_via_scp.sh
-

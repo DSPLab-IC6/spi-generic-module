@@ -3,11 +3,10 @@
 DEFAULT_UNAME=root
 DEFAULT_IP=192.168.7.2
 
-DEFAULT_TARGET='spi-generic-module'
+DEFAULT_TARGET='spi-protocol-generic'
 
 DEFAULT_BUILD_DIR=`pwd`/build
 
-DEFAULT_PREFIX_KERNEL_MODULE="/lib/modules/'`uname -r`'/extra"
 DEFAULT_PREFIX_HEADER="/usr/include"
 
 UNAME=${UNAME:=${DEFAULT_UNAME}}
@@ -24,9 +23,9 @@ while [ $# -gt 0 ]; do
     --target)
       TARGET=shift
       ;;
-		--build-dir)
-			BUILD_DIR=shift
-			;;
+    --build-dir)
+      BUILD_DIR=shift
+      ;;
     *)
       printf "***************************\n"
       printf "* Error: Invalid argument *\n"
@@ -37,10 +36,11 @@ while [ $# -gt 0 ]; do
 done
 
 TARGET=${TARGET:=${DEFAULT_TARGET}}
+TARGET_KERNEL_VERSION=$(ssh ${UNAME}@${IP} 'uname -r')
 BUILD_DIR=${BUILD_DIR:=${DEFAULT_BUILD_DIR}}
-PREFIX_KERNEL_MODULE=${PREFIX_KERNEL_MODULE:=${DEFAULT_PREFIX_KERNEL_MODULE}}
+PREFIX_KERNEL_MODULE=/lib/modules/${TARGET_KERNEL_VERSION}/extra
 PREFIX_HEADER=${PREFIX_HEADER:=${DEFAULT_PREFIX_HEADER}}
 
 scp ${BUILD_DIR}/${TARGET}.ko ${UNAME}@${IP}:${PREFIX_KERNEL_MODULE}
-scp 						 ${TARGET}.h  ${UNAME}@${IP}:${PREFIX_HEADER}
+scp              ${TARGET}.h  ${UNAME}@${IP}:${PREFIX_HEADER}
 

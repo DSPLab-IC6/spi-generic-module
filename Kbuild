@@ -1,1 +1,1 @@
-obj-m := spi-generic-module
+obj-m := spi-protocol-generic.o
