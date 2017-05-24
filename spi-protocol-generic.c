@@ -17,10 +17,12 @@
 #include <linux/init.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/spi/spi.h>
-
 #include <linux/fs.h>
 #include <linux/cdev.h>
+
+#include <linux/spi/spi.h>
+
+#include "spi-protocol-generic.h"
 
 
 #define SPI_CLASS_NAME                  "spi_protocol_generic"
@@ -28,18 +30,23 @@
 
 static dev_t spi_protocol_generic_dev_t;
 static struct device            *spi_protocol_generic_dev;
-static struct cdev                      *spi_protocol_generic_cdev;
-static struct class                     *spi_protocol_generic_class;
+static struct cdev              *spi_protocol_generic_cdev;
+static struct class             *spi_protocol_generic_class;
 static struct spi_device        *spi_protocol_generic_spi;
 
 struct spi_device_default_values {
-        u32             speed_hz;
-        u16             mode;
-        u8              bits_per_word;
+        u32 speed_hz;
+        u16 mode;
+        u8  bits_per_word;
 };
 
 static struct spi_device *__spi_device_internal;
 static struct spi_device_default_values default_values;
+
+static u8 *tx_buffer_reg;
+static u8 *rx_buffer_reg;
+static unsigned buf_reg_size = 2;
+static unsigned n_reg_xfers = 2;
 
 #ifdef CONFIG_OF
 static const struct of_device_id spi_protocol_generic_of_match[] = {
@@ -57,6 +64,73 @@ static const struct spi_device_id spi_protocol_generic_device_id[] = {
 MODULE_DEVICE_TABLE(spi, spi_protocol_generic_device_id);
 #endif // CONFIG_OF
 
+static struct spi_message *
+__make_reg_message(struct spi_transfer *k_xfer)
+{
+	struct spi_message *msg;
+	msg = kmalloc(sizeof(struct spi_message), GFP_KERNEL);
+	if (msg == NULL)
+		return ERR_PTR(-ENOMEM);
+
+	spi_message_init_with_transfers(msg, k_xfer, n_reg_xfers);
+	return msg;
+}
+
+static struct spi_transfer *
+__make_reg_transfers(struct register_info *reg_info)
+{
+	struct spi_transfer *xfer, *head;
+	u8 *tx_buf, *rx_buf;
+	unsigned n;
+
+	// Copy to global TX buffer addresses of reg_info fields
+	*tx_buffer_reg = &reg_info->reg_addr;
+	*(tx_buffer_reg + 1) = &reg_info->value;
+
+	tx_buf = tx_buffer_reg;
+
+	xfer = kcalloc(2, sizeof(struct spi_transfer), GFP_KERNEL);
+	if (xfer == NULL)
+		return ERR_PTR(-ENOMEM);
+
+	head = xfer;
+
+	for (n = n_reg_xfers;
+	     n;
+	     n--, xfer++, tx_buf++) {
+		xfer->tx_buf = tx_buf;
+		xfer->rx_buf = NULL;
+		xfer->delay_usecs = 1;
+	}
+
+	return head;
+}
+
+static struct spi_transfer *
+__make_get_reg_transfers(struct register_info *reg_info)
+{
+	struct spi_transfer *xfer, *head;
+	u8 *tx_buf, *rx_buf;
+	unsigned n;
+
+	xfer = kcalloc(2, sizeof(struct spi_transfer), GFP_KERNEL);
+	if (xfer == NULL)
+		return ERR_PTR(-ENOMEM);
+
+	head = xfer;
+
+	xfer->tx_buf = &(reg_info->reg_addr);
+	xfer->rx_buf = NULL;
+	xfer->delay_usecs = 1;
+
+	xfer++;
+
+	xfer->tx_buf = NULL;
+	xfer->rx_buf = &(reg_info->value);
+
+	return head;
+}
+
 // Char subsystem functions;
 static int spi_protocol_generic_open(struct inode *inode, struct file *file_p)
 {
@@ -72,7 +146,7 @@ spi_protocol_generic_read(struct file *file_p, char __user *buf, size_t lbuf,
                 loff_t *ppos)
 {
         int err;
-        u8 *read_buffer = kmalloc(2, GFP_KERNEL);
+        u8 *read_buffer = kcalloc(2, sizeof(u8), GFP_KERNEL);
         struct spi_transfer read_arduino[1] = {};
 
         printk(KERN_DEBUG "spi-protocol-generic: read() called...\n");
@@ -98,10 +172,10 @@ spi_protocol_generic_read(struct file *file_p, char __user *buf, size_t lbuf,
 
 static ssize_t
 spi_protocol_generic_write(struct file *file_p, const char __user *buf,
-                 size_t lbuf, loff_t *ppos)
+			   size_t lbuf, loff_t *ppos)
 {
         int err;
-        u8 *write_buffer = kmalloc(2, GFP_KERNEL);
+        u8 *write_buffer = kcalloc(2, sizeof(u8), GFP_KERNEL);
         struct spi_transfer write_arduino[1] = {};
 
         printk(KERN_DEBUG "spi-protocol-generic: write() %d bytes called...\n",
@@ -127,10 +201,88 @@ spi_protocol_generic_write(struct file *file_p, const char __user *buf,
                 return 2;
 }
 
+static long
+spi_protocol_generic_ioctl(struct file *file_p, unsigned int cmd,
+			   unsigned long arg)
+{
+	int retval = 0;
+	int status = 0;
+	u8  reg;
+	struct register_info tmp;
+	struct spi_transfer *spi_xfers;
+	struct spi_message *spi_msg;
+
+	switch (cmd) {
+	case SPI_GENERIC_SET_STATUS:
+		retval == copy_from_user(&tmp,
+					 (struct register_info __user *)arg,
+					 sizeof(struct register_info));
+		if (retval == 0) {
+			spi_xfers = __make_reg_transfers(&tmp);
+			if (IS_ERR(spi_xfers)) {
+				retval = PTR_ERR(spi_xfers);
+				break;
+			}
+
+			spi_msg = __make_reg_message(spi_xfers);
+			if (IS_ERR(spi_msg)) {
+				retval = PTR_ERR(spi_msg);
+				break;
+			}
+
+			status = spi_sync(__spi_device_internal, spi_msg);
+			kfree(spi_msg);
+			kfree(spi_xfers);
+
+			if (status == 0)
+				return 1;
+			else
+				return status;
+		}
+		break;
+	case SPI_GENERIC_GET_STATUS:
+		retval == copy_from_user(&tmp,
+					 (struct register_info __user *)arg,
+					 sizeof(struct register_info));
+
+		if (retval == 0) {
+			spi_xfers = __make_get_reg_transfers(&tmp);
+			if (IS_ERR(spi_xfers)) {
+				retval = PTR_ERR(spi_xfers);
+				break;
+			}
+
+			spi_msg = __make_reg_message(spi_xfers);
+			if (IS_ERR(spi_msg)) {
+				retval = PTR_ERR(spi_msg);
+				break;
+			}
+
+			status = spi_sync(__spi_device_internal, spi_msg);
+			kfree(spi_msg);
+			kfree(spi_xfers);
+
+			if (status == 0) {
+				retval == copy_to_user(
+					(struct register_info __user *)arg,
+					&tmp,
+					sizeof(struct register_info));
+				return 1;
+			}
+			else
+				return status;
+		}
+		break;
+	}
+
+	return retval;
+}
+
 static const struct file_operations spi_protocol_generic_fops = {
         .owner          = THIS_MODULE,
         .write          = spi_protocol_generic_write,
         .read           = spi_protocol_generic_read,
+	.unlocked_ioctl = spi_protocol_generic_ioctl,
         .open           = spi_protocol_generic_open,
         .release        = spi_protocol_generic_release,
 };
@@ -252,12 +404,19 @@ static int spi_protocol_generic_probe(struct spi_device *spi)
                                       SPI_PROTOCOL_GENERIC_DEVICE_0);
         }
 
+	// Initiate buffer for registry operations
+	tx_buffer_reg = kzalloc(buf_reg_size, GFP_KERNEL);
+	rx_buffer_reg = kzalloc(buf_reg_size, GFP_KERNEL);
+
         return 0;
 }
 
 static int spi_protocol_generic_remove(struct spi_device *spi)
 {
         printk(KERN_DEBUG "spi-protocol-generic: remove().\n");
+
+	kfree(tx_buffer_reg);
+	kfree(rx_buffer_reg);
 
         spi->max_speed_hz = default_values.speed_hz;
         spi_setup(spi);
@@ -280,7 +439,6 @@ static struct spi_driver spi_protocol_generic = {
         .probe  = spi_protocol_generic_probe,
         .remove = spi_protocol_generic_remove,
 };
-
 
 static int __init spi_protocol_generic_init(void) {
         int status;
