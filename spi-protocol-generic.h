@@ -1,4 +1,9 @@
+#ifdef __KERNEL__
 #include <linux/ioctl.h>
+#else
+#include <sys/ioctl.h>
+#include <stdint.h>
+#endif
 
 #define SPI_GENERIC_MAGIC	0xDE
 #define SPI_GENERIC_SET_STATUS	_IOW( SPI_GENERIC_MAGIC, 0, struct register_info)
@@ -6,6 +11,6 @@
 #define DEVPATH "/dev/pro_mini_spi_generic"
 
 struct register_info {
-	__u8 reg_addr;
-	__u8 value;
+	uint8_t reg_addr;
+	uint8_t value;
 };

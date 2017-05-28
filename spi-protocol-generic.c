@@ -24,9 +24,23 @@
 
 #include "spi-protocol-generic.h"
 
+#ifdef DEBUG_SPI_PROTOCOL_GENERIC
+#define debug_printk(...) printk(KERN_DEBUG "spi-protocol-generic: "); \
+	printk(KERN_CONT __VA_ARGS__)
+#else /* DEBUG_SPI_PROTOCOL_GENERIC */
+#define debug_printk(...) do {} while(0)
+#endif /* DEBUG_SPI_PROTOCOL_GENERIC */
 
 #define SPI_CLASS_NAME			"spi_protocol_generic"
 #define SPI_PROTOCOL_GENERIC_DEVICE_0	"pro_mini_spi_generic"
+
+#define MAGIX_TRANSACTION 0xFA
+#define GET_REGISTER	  0xDE
+#define SET_REGISTER      0xDB
+
+static u8 request_registry = MAGIX_TRANSACTION;
+static u8 get_register	   = GET_REGISTER;
+static u8 set_register     = SET_REGISTER;
 
 static dev_t spi_protocol_generic_dev_t;
 static struct device		*spi_protocol_generic_dev;
@@ -75,6 +89,29 @@ __make_reg_message(struct spi_transfer *k_xfer)
 	return msg;
 }
 
+static void
+__make_req_reg(struct spi_transfer *xfer)
+{
+	xfer->tx_buf = &request_registry;
+	xfer->rx_buf = NULL;
+	xfer->delay_usecs = 1;
+}
+
+static void
+__make_req_cmd(struct spi_transfer *xfer, u8 cmd)
+{
+	xfer->rx_buf = NULL;
+	xfer->delay_usecs = 1;
+	switch (cmd) {
+	case SET_REGISTER:
+		xfer->tx_buf = &set_register;
+		break;
+	case GET_REGISTER:
+		xfer->tx_buf = &get_register;
+		break;
+	}
+}
+
 static struct spi_transfer *
 __make_reg_transfers(struct register_info *reg_info)
 {
@@ -88,11 +125,14 @@ __make_reg_transfers(struct register_info *reg_info)
 
 	tx_buf = tx_buffer_reg;
 
-	xfer = kcalloc(2, sizeof(struct spi_transfer), GFP_KERNEL);
+	xfer = kcalloc(4, sizeof(struct spi_transfer), GFP_KERNEL);
 	if (xfer == NULL)
 		return ERR_PTR(-ENOMEM);
 
 	head = xfer;
+
+	__make_req_reg(xfer++);
+	__make_req_cmd(xfer++, SET_REGISTER);
 
 	for (n = n_reg_xfers;
 	     n;
@@ -110,11 +150,14 @@ __make_get_reg_transfers(struct register_info *reg_info)
 {
 	struct spi_transfer *xfer, *head;
 
-	xfer = kcalloc(2, sizeof(struct spi_transfer), GFP_KERNEL);
+	xfer = kcalloc(4, sizeof(struct spi_transfer), GFP_KERNEL);
 	if (xfer == NULL)
 		return ERR_PTR(-ENOMEM);
 
 	head = xfer;
+
+	__make_req_reg(xfer++);
+	__make_req_cmd(xfer++, GET_REGISTER);
 
 	xfer->tx_buf = &(reg_info->reg_addr);
 	xfer->rx_buf = NULL;
@@ -267,7 +310,6 @@ spi_protocol_generic_ioctl(struct file *file_p, unsigned int cmd,
 					(struct register_info __user *)arg,
 					&tmp,
 					sizeof(struct register_info));
-				return 1;
 			}
 			else
 				return status;
@@ -290,16 +332,14 @@ static const struct file_operations spi_protocol_generic_fops = {
 
 static int spi_protocol_generic_probe(struct spi_device *spi)
 {
-	int err;
+	int err, ret;
 	int devData = 0;
-	unsigned n;
 	const struct of_device_id *match;
 
-	int max_speed_arduino = 20000;
+	struct device_node *of_target_node, *parent;
+	u32 max_speed_arduino = 0;
 
-	struct spi_transfer spi_element[2] = {};
-	unsigned char ch16[] = {0xDE, 0xAD};
-	unsigned char *rx16 = kzalloc(2, GFP_KERNEL);
+	const char *of_compt_str = kcalloc(sizeof(char), 255, GFP_KERNEL);
 
 	printk(KERN_DEBUG "spi-protocol-generic: probe called.\n");
 
@@ -313,22 +353,33 @@ static int spi_protocol_generic_probe(struct spi_device *spi)
 
 	// check and read data from of_device_id...
 	match = of_match_device(spi_protocol_generic_of_match, &spi->dev);
-	if(!match) {
-		printk(KERN_DEBUG "spi-protocol-generic: device not found in device tree...\n");
+	if (!match) {
+		debug_printk("device not found in device tree...\n");
 		return -1;
 	}
-	else {
-		devData = match->data;
-		printk(KERN_DEBUG "spi-protocol-generic: probe data is: %d\n",
-		       devData);
+	of_target_node = of_find_compatible_node(NULL, NULL, match->compatible);
+	if (!of_target_node) {
+		of_node_put(of_target_node);
+		debug_printk("no compatible devices in DT!\n");
+	}
+	parent = of_target_node;
+	// Here we can use of_get_property, but I prefer more readable
+	// code insted of mire obvious
+	ret = of_property_read_u32(of_target_node, "spi-max-frequency",
+			   &max_speed_arduino);
+	if (ret) {
+		debug_printk("cannot find property in DT node, status %d\n",
+			     ret);
+		return ret;
+	} else {
+		debug_printk("freq is %d Hz\n", max_speed_arduino);
 	}
 
 	spi->bits_per_word = 8;
-	spi->mode = (0);
-	spi->max_speed_hz = 20000;
-	spi_setup(spi);
-
+	spi->mode = SPI_MODE_0;
+	spi->max_speed_hz = max_speed_arduino;
 	err = spi_setup(spi);
+
 	if (err < 0) {
 		printk(KERN_DEBUG "spi-protocol-generic: spi_setup failed!\n");
 		return err;
@@ -339,26 +390,6 @@ static int spi_protocol_generic_probe(struct spi_device *spi)
 
 	printk(KERN_DEBUG "spi-protocol-generic: spi_setup ok, cs: %d\n",
 	       spi->chip_select);
-	printk(KERN_DEBUG "spi-protocol-generic: start data transfer...\n");
-
-	spi_element[0].tx_buf = ch16;
-	spi_element[1].rx_buf = rx16;
-
-	for (n = 0; n < 2; n++) {
-		spi_element[n].len = 2;
-	}
-
-	err = spi_sync_transfer(__spi_device_internal, spi_element,
-				ARRAY_SIZE(spi_element));
-	printk(KERN_DEBUG "spi-protocol-generic: data size is %d\n", 2);
-	if (err < 0) {
-		printk(KERN_DEBUG "spi-protocol-generic: spi_sync_transfer failed!\n");
-		return err;
-	}
-
-	printk(KERN_DEBUG "spi-protocol-generic: transfer ok\n");
-	printk("%X %X\n", rx16[0], rx16[1]);
-	print_hex_dump_bytes("", DUMP_PREFIX_NONE, rx16, 2);
 
 	// define a device class
 	spi_protocol_generic_class = class_create(THIS_MODULE, SPI_CLASS_NAME);
@@ -408,6 +439,7 @@ static int spi_protocol_generic_probe(struct spi_device *spi)
 	// Initiate buffer for registry operations
 	tx_buffer_reg = kzalloc(buf_reg_size, GFP_KERNEL);
 	rx_buffer_reg = kzalloc(buf_reg_size, GFP_KERNEL);
+	kfree(of_compt_str);
 
 	return 0;
 }

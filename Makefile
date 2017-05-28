@@ -15,6 +15,9 @@ default: $(BUILD_DIR)
 	touch $(BUILD_DIR)/Makefile
 	$(MAKE) -C $(KDIR) M=$(BUILD_DIR) src=$(PWD) modules
 
+debug: $(BUILD_DIR)
+	$(MAKE) CFLAGS_MODULE="-DDEBUG_SPI_PROTOCOL_GENERIC" default
+
 $(BUILD_DIR):
 	mkdir -p "$@"
 
