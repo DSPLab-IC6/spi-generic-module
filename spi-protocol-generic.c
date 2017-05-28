@@ -336,20 +336,18 @@ static int spi_protocol_generic_probe(struct spi_device *spi)
 	int devData = 0;
 	const struct of_device_id *match;
 
-	struct device_node *of_target_node, *parent;
+	struct device_node *of_target_node;
 	u32 max_speed_arduino = 0;
 
 	const char *of_compt_str = kcalloc(sizeof(char), 255, GFP_KERNEL);
-
-	printk(KERN_DEBUG "spi-protocol-generic: probe called.\n");
 
 	__spi_device_internal = spi;
 	default_values.speed_hz = spi->max_speed_hz;
 	default_values.mode = spi->mode;
 	default_values.bits_per_word = spi->bits_per_word;
 
-	printk(KERN_DEBUG "spi-protocol-generic: default speed is %d Hz\n",
-	       default_values.speed_hz);
+	debug_printk("spi-protocol-generic: default speed is %d Hz\n",
+		     default_values.speed_hz);
 
 	// check and read data from of_device_id...
 	match = of_match_device(spi_protocol_generic_of_match, &spi->dev);
@@ -362,17 +360,19 @@ static int spi_protocol_generic_probe(struct spi_device *spi)
 		of_node_put(of_target_node);
 		debug_printk("no compatible devices in DT!\n");
 	}
-	parent = of_target_node;
+
 	// Here we can use of_get_property, but I prefer more readable
 	// code insted of mire obvious
-	ret = of_property_read_u32(of_target_node, "spi-max-frequency",
-			   &max_speed_arduino);
+//	ret = of_property_read_u32(of_target_node, "spi-max-frequency",
+//				   &max_speed_arduino);
+	max_speed_arduino = *(u32 *)of_get_property(of_target_node, "spi-max-frequency", NULL); 
+
 	if (ret) {
 		debug_printk("cannot find property in DT node, status %d\n",
 			     ret);
 		return ret;
 	} else {
-		debug_printk("freq is %d Hz\n", max_speed_arduino);
+		debug_printk("freq is %x Hz\n", max_speed_arduino);
 	}
 
 	spi->bits_per_word = 8;
