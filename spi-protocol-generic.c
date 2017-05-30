@@ -11,6 +11,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/list.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/uaccess.h>
@@ -31,8 +32,7 @@
 #define debug_printk(...) do {} while(0)
 #endif /* DEBUG_SPI_PROTOCOL_GENERIC */
 
-#define SPI_CLASS_NAME			"spi_protocol_generic"
-#define SPI_PROTOCOL_GENERIC_DEVICE_0	"pro_mini_spi_generic"
+// Protocol info
 
 #define MAGIX_TRANSACTION 0xFA
 #define GET_REGISTER	  0xDE
@@ -42,9 +42,13 @@ static u8 request_registry = MAGIX_TRANSACTION;
 static u8 get_register	   = GET_REGISTER;
 static u8 set_register     = SET_REGISTER;
 
-static dev_t spi_protocol_generic_dev_t;
-static struct device		*spi_protocol_generic_dev;
-static struct cdev		*spi_protocol_generic_cdev;
+// Internal info
+
+#define SPI_CLASS_NAME			"spi_protocol_generic"
+#define SPI_PROTOCOL_GENERIC_DEVICE	"pro_mini_spi_generic"
+
+static dev_t first_dev_t;
+static unsigned minorcount;
 static struct class		*spi_protocol_generic_class;
 
 struct spi_device_default_values {
@@ -53,17 +57,56 @@ struct spi_device_default_values {
 	u8  bits_per_word;
 };
 
-static struct spi_device *__spi_device_internal;
-static struct spi_device_default_values default_values;
+struct meta_information {
+	struct spi_device *device;
+	struct spi_device_default_values default_values;
 
-static u8 *tx_buffer_reg;
-static u8 *rx_buffer_reg;
-static unsigned buf_reg_size = 2;
-static unsigned n_reg_xfers = 2;
+	dev_t device_maj_min;
+	struct cdev *char_device;
+	struct device *sysfs_device;
+
+	u8 *tx_buffer_reg;
+	u8 *rx_buffer_reg;
+
+	struct list_head list_entry;
+};
+
+static LIST_HEAD(meta_info_list);
+static DEFINE_MUTEX(device_list_lock);
+
+static const unsigned buf_reg_size = 2;
+static const unsigned n_reg_xfers = 2;
+
+#ifdef MY_BUGGY_DT_OVERLAY
+enum {
+	pro_mini,
+	due,
+};
+
+struct arduino_board_info {
+	u32 spi_frequency;
+};
+
+static const struct arduino_board_info arduino_info[] = {
+	[pro_mini] = {
+		.spi_frequency = 500000,
+	},
+	[due] = {
+		.spi_frequency = 4000000,
+	},
+};
+#endif /* MY_BUGGY_DT_OVERLAY */
 
 #ifdef CONFIG_OF
 static const struct of_device_id spi_protocol_generic_of_match[] = {
-	{ .compatible = "arduino,pro-mini-spi-generic" },
+	{
+		.compatible = "arduino,pro-mini-spi-generic",
+		.data = &arduino_info[pro_mini],
+	},
+	{
+		.compatible = "arduino,due-spi-generic",
+		.data = &arduino_info[due],
+	},
 	{ },
 };
 MODULE_DEVICE_TABLE(of, spi_protocol_generic_of_match);
@@ -75,7 +118,7 @@ static const struct spi_device_id spi_protocol_generic_device_id[] = {
 	{ },
 };
 MODULE_DEVICE_TABLE(spi, spi_protocol_generic_device_id);
-#endif // CONFIG_OF
+#endif /* CONFIG_OF */
 
 static struct spi_message *
 __make_reg_message(struct spi_transfer *k_xfer)
@@ -332,19 +375,28 @@ static const struct file_operations spi_protocol_generic_fops = {
 
 static int spi_protocol_generic_probe(struct spi_device *spi)
 {
+	struct meta_information *device_meta_info;
 	int err, ret;
-	int devData = 0;
 	const struct of_device_id *match;
 
-	struct device_node *of_target_node;
+	dev_t new_device_dev_t;
+
+	struct device_node *of_arduino_node;
 	u32 max_speed_arduino = 0;
 
-	const char *of_compt_str = kcalloc(sizeof(char), 255, GFP_KERNEL);
+	device_meta_info = kzalloc(sizeof(meta_information), GFP_KERNEL);
+	if (!device_meta_info)
+		return -ENOMEM;
 
-	__spi_device_internal = spi;
-	default_values.speed_hz = spi->max_speed_hz;
-	default_values.mode = spi->mode;
-	default_values.bits_per_word = spi->bits_per_word;
+	device_meta_info->device = spi;
+	device_meta_info->default_values.speed_hz = spi->max_speed_hz;
+	device_meta_info->default_values.mode = spi->mode;
+	device_meta_info->default_values.bits_per_word = spi->bits_per_word;
+
+	// Initiate buffer for registry operations
+	device_meta_info->tx_buffer_reg = kzalloc(buf_reg_size, GFP_KERNEL);
+	device_meta_info->rx_buffer_reg = kzalloc(buf_reg_size, GFP_KERNEL);
+
 
 	debug_printk("spi-protocol-generic: default speed is %d Hz\n",
 		     default_values.speed_hz);
@@ -355,18 +407,13 @@ static int spi_protocol_generic_probe(struct spi_device *spi)
 		debug_printk("device not found in device tree...\n");
 		return -1;
 	}
-	of_target_node = of_find_compatible_node(NULL, NULL, match->compatible);
-	if (!of_target_node) {
-		of_node_put(of_target_node);
-		debug_printk("no compatible devices in DT!\n");
-	}
 
 	// Here we can use of_get_property, but I prefer more readable
-	// code insted of mire obvious
-//	ret = of_property_read_u32(of_target_node, "spi-max-frequency",
-//				   &max_speed_arduino);
-	max_speed_arduino = *(u32 *)of_get_property(of_target_node, "spi-max-frequency", NULL); 
-
+	// code instead of more obvious.
+	// TODO: getting info from directly DT
+	of_arduino_node = spi->dev.of_node;
+	ret = of_property_read_u32(of_arduino_node, "spi-max-frequency",
+				   &max_speed_arduino);
 	if (ret) {
 		debug_printk("cannot find property in DT node, status %d\n",
 			     ret);
@@ -391,95 +438,119 @@ static int spi_protocol_generic_probe(struct spi_device *spi)
 	printk(KERN_DEBUG "spi-protocol-generic: spi_setup ok, cs: %d\n",
 	       spi->chip_select);
 
-	// define a device class
-	spi_protocol_generic_class = class_create(THIS_MODULE, SPI_CLASS_NAME);
-	if (spi_protocol_generic_class == NULL) {
-		printk(KERN_DEBUG "spi_protocol_generic: class_create failed!\n");
-		return -1;
-	}
+	// BOO! Dark code...
+	// TODO: Look through it
 
 	// create char device entry in sysfs...
-	if (devData == 0) {
-		err = alloc_chrdev_region(&spi_protocol_generic_dev_t, 0, 1,
-		  SPI_PROTOCOL_GENERIC_DEVICE_0);
+	if (first_dev_t == 0) {
+		err = alloc_chrdev_region(&first_dev_t,
+					  minorcount++, 1,
+					  SPI_PROTOCOL_GENERIC_DEVICE);
+		new_device_dev_t = first_dev_t;
+	} else {
+		new_device_dev_t = first_dev_t + minorcount++;
+		err = register_chrdev_region(new_device_dev_t, 1,
+					     SPI_PROTOCOL_GENERIC_DEVICE);
 	}
+	device_meta_info->device_maj_min = new_device_dev_t;
+
 	if (err < 0) {
-		printk(KERN_DEBUG "spi_protocol_generic: alloc_chrdev_region failed!\n");
-		class_destroy(spi_protocol_generic_class);
+		debug_printk("(alloc/register)_chrdev_region failed!\n");
 		return err;
 	}
 
 	spi_protocol_generic_cdev = cdev_alloc();
 	if (!(spi_protocol_generic_cdev)) {
 		printk(KERN_DEBUG "spi_protocol_generic: cdev_alloc failed!\n");
-		unregister_chrdev_region(spi_protocol_generic_dev_t, 1);
-		class_destroy(spi_protocol_generic_class);
+		unregister_chrdev_region(first_dev_t, 1);
 		return -1;
 	}
 
 	cdev_init(spi_protocol_generic_cdev, &spi_protocol_generic_fops);
-
-	err = cdev_add(spi_protocol_generic_cdev,
-		       spi_protocol_generic_dev_t, 1);
+	err = cdev_add(spi_protocol_generic_cdev, new_device_dev_t, 1);
 	if(err < 0) {
 		printk(KERN_DEBUG "spi_protocol_generic: cdev_add failed!\n");
 		cdev_del(spi_protocol_generic_cdev);
-		unregister_chrdev_region(spi_protocol_generic_dev_t, 1);
-		class_destroy(spi_protocol_generic_class);
+		unregister_chrdev_region(new_device_dev_t, 1);
 		return err;
 	}
 
-	if (devData == 0) {
-		spi_protocol_generic_dev =
-			device_create(spi_protocol_generic_class, NULL,
-				      spi_protocol_generic_dev_t, NULL, "%s",
-				      SPI_PROTOCOL_GENERIC_DEVICE_0);
-	}
+	spi_protocol_generic_dev =
+		device_create(spi_protocol_generic_class, NULL,
+			      new_device_dev_t, NULL, "%s%d",
+			      SPI_PROTOCOL_GENERIC_DEVICE, minorcount - 1);
 
-	// Initiate buffer for registry operations
-	tx_buffer_reg = kzalloc(buf_reg_size, GFP_KERNEL);
-	rx_buffer_reg = kzalloc(buf_reg_size, GFP_KERNEL);
-	kfree(of_compt_str);
+	//
+
+	list_add(&device_meta_info->list_entry, &meta_info_list);
+	spi_set_drvdata(spi, device_meta_info);
 
 	return 0;
 }
 
 static int spi_protocol_generic_remove(struct spi_device *spi)
 {
+	struct meta_information *device_meta_info = spi_get_drvdata(spi);
+
 	printk(KERN_DEBUG "spi-protocol-generic: remove().\n");
 
-	kfree(tx_buffer_reg);
-	kfree(rx_buffer_reg);
+	list_del(&device_meta_info->list_entry);
+	device_destroy(spi_protocol_generic_class, first_dev_t + index);
+
+	kfree(device_meta_info->tx_buffer_reg);
+	kfree(device_meta_info->rx_buffer_reg);
 
 	spi->max_speed_hz = default_values.speed_hz;
+	spi->mode = default_values.mode;
+	spi->bits_per_word = default_values.bits_per_word;
 	spi_setup(spi);
 
-	device_destroy(spi_protocol_generic_class, spi_protocol_generic_dev_t);
+	// BOO! Dark code...
+	// TODO: LOOK THROUGH IT!
+
 	if(spi_protocol_generic_cdev) {
 		cdev_del(spi_protocol_generic_cdev);
 	}
-	unregister_chrdev_region(spi_protocol_generic_dev_t, 1);
-	class_destroy(spi_protocol_generic_class);
+	unregister_chrdev_region(first_dev_t + index, 1);
+
+	//
 	return 0;
 }
 
 static struct spi_driver spi_protocol_generic = {
 	.driver = {
-		.owner			= THIS_MODULE,
-		.name			= "spi-protocol-generic",
+		.owner		= THIS_MODULE,
+		.name		= "spi-protocol-generic",
 		.of_match_table = of_match_ptr(spi_protocol_generic_of_match),
 	},
 	.probe	= spi_protocol_generic_probe,
 	.remove = spi_protocol_generic_remove,
 };
 
-static int __init spi_protocol_generic_init(void) {
+static int __init spi_protocol_generic_init(void)
+{
 	int status;
+
+	minorcount = 0;
+
 	status = spi_register_driver(&spi_protocol_generic);
+	if (status < 0)
+		return status;
+
+	// define a device class
+	spi_protocol_generic_class = class_create(THIS_MODULE, SPI_CLASS_NAME);
+	if (IS_ERR(spi_protocol_generic_class)) {
+		printk(KERN_DEBUG "spi_protocol_generic: class_create failed!\n");
+		spi_unregister_driver(&spi_protocol_generic);
+		return PTR_ERR(spi_protocol_generic_class);
+	}
+
 	return status;
 }
 
 static void __exit spi_protocol_generic_exit(void) {
+	class_destroy(spi_protocol_generic_class);
+
 	spi_unregister_driver(&spi_protocol_generic);
 }
 
