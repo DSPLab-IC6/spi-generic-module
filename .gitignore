@@ -1,0 +1,8 @@
+.cproject
+.lvimrc
+.project
+.settings/
+*.swp
+build/
+*.vim
+

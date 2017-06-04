@@ -1,3 +1,0 @@
-[submodule "test/userspace"]
-	path = test/userspace
-	url = git@github.com:DSPLab-IC6/spi-generic-test-program.git
