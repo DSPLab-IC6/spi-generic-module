@@ -86,6 +86,39 @@ class ShellHandler:
 
         return shin, shout, sherr
 
+
+class KernelParser:
+
+    def __init__(self, prefix_kmod, prefix_capemgr):
+        re_datestamp ="^\[\s*\d+\.\d+\]\s+"
+        re_line = ":\s+(?P<line>.*)$"
+        self.re_capemgr = re.compile(re_datestamp + re.escape(prefix_capemgr) +
+            re_line, re.DOTALL)
+        self.re_kmod = re.compile(re_datestamp + re.escape(prefix_kmod) +
+            re_line, re.DOTALL)
+
+    def parse_capemgr(self, list_str):
+        list_output = []
+        for str in list_str:
+            output = self.re_capemgr.match(str)
+            if output:
+                output = output.groupdict().get('line', 'NONE')
+                if output != "NONE":
+                    list_output.append(output)
+
+        return list_output
+
+    def parse_kmod(self, list_str):
+        list_output = []
+        for str in list_str:
+            output = self.re_kmod.match(str)
+            if output:
+                output = output.groupdict().get('line', 'NONE')
+                if output != "NONE":
+                    list_output.append(output)
+
+        return list_output
+
 def make_path(private_rsa_key):
     path = os.path.join(os.environ['HOME'], '.ssh', private_rsa_key)
     return path
@@ -104,7 +137,12 @@ if __name__ == "__main__":
         handler = ShellHandler(client)
         handler.connect()
         stdin, stdout, stderr = handler.execute('uname -r')
+        _, stdout, _ = handler.execute('load-overlays; dmesg | tail -n 10')
 
+        parser = KernelParser("spi-protocol-generic",
+            "bone_capemgr bone_capemgr")
+
+        stdout = parser.parse_capemgr(stdout)
         data = ""
         for line in stdout:
             data += line

@@ -5,7 +5,7 @@ TARGET := "spi-protocol-generic"
 PREFIX_HEADER := usr/include
 
 SYSROOT := $(HOME)/sysroots/staging/beaglebone-black
-KDIR ?= ${HOME}/sysroots/staging/beaglebone-black/lib/modules/4.4.23/build
+KDIR ?= ${HOME}/sysroots/staging/beaglebone-black/lib/modules/4.4.54/build
 PWD := $(shell pwd)
 BUILD_DIR := $(PWD)/build
 export ARCH := arm
@@ -36,5 +36,8 @@ uninstall:
 	rm -f ${SYSROOT}/${PREFIX_KERNEL_MODULE}/${TARGET}.ko
 	rm -f ${SYSROOT}/${PREFIX_HEADER}/${TARGER}.h
 
-deploy:
+deploy: 
 	./deploy-via-scp.sh
+
+test: debug deploy
+	python3 test/test.py
