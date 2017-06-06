@@ -142,7 +142,7 @@ if __name__ == "__main__":
         parser = KernelParser("spi-protocol-generic",
             "bone_capemgr bone_capemgr")
 
-        stdout = parser.parse_capemgr(stdout)
+        #stdout = parser.parse_capemgr(stdout)
         data = ""
         for line in stdout:
             data += line
