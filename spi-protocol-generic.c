@@ -546,6 +546,8 @@ static int __init spi_protocol_generic_init(void)
 
 	minorcount = 0;
 
+	debug_printk("loading module...");
+
 	// define a device class
 	spi_protocol_generic_class = class_create(THIS_MODULE, SPI_CLASS_NAME);
 	if (IS_ERR(spi_protocol_generic_class)) {
